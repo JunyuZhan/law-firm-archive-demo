@@ -1,0 +1,1 @@
+import{r as t}from"./index-B-CHfsZP.js";function s(r){return t({url:"/push-records",method:"get",params:r})}function u(r){return t({url:`/push-records/${r}`,method:"get"})}function o(){return t({url:"/push-records/statistics",method:"get"})}function c(r){return t({url:`/push-records/${r}/retry`,method:"post"})}export{s as a,o as b,u as g,c as r};

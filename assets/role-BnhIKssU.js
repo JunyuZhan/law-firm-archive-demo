@@ -1,0 +1,1 @@
+import{r as t}from"./index-B-CHfsZP.js";function u(){return t({url:"/roles",method:"get"})}function l(){return t({url:"/roles/options",method:"get"})}function n(e){return t({url:"/roles",method:"post",data:e})}function s(e,o){return t({url:`/roles/${e}`,method:"put",data:o})}function a(e){return t({url:`/roles/${e}`,method:"delete"})}export{l as a,n as c,a as d,u as g,s as u};

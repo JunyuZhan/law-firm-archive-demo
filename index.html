@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智慧律所档案管理系统</title>
+  <link rel="icon" type="image/x-icon" href="./favicon.ico">
+  <link rel="apple-touch-icon" href="./pwa-192x192.png">
+  
+  <!-- 安全相关Meta标签 -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  
+  <!-- Content Security Policy (只保留支持的指令)；含 Cloudflare Web Analytics 常用域，避免经 Cloudflare 代理时控制台报 CSP 拦截 -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com;
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: blob: https:;
+    font-src 'self' data:;
+    connect-src 'self' ws: wss: http://localhost:* http://127.0.0.1:* https://cloudflareinsights.com;
+    base-uri 'self';
+    form-action 'self';
+  ">
+  <script type="module" crossorigin src="./assets/index-B-CHfsZP.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/vue-vendor-CuzOvX5E.js">
+  <link rel="modulepreload" crossorigin href="./assets/vendor-DQ88nuy_.js">
+  <link rel="modulepreload" crossorigin href="./assets/element-plus-D81J6DOw.js">
+  <link rel="stylesheet" crossorigin href="./assets/element-plus-EwZkKDLA.css">
+  <link rel="stylesheet" crossorigin href="./assets/index-DFK-lsCr.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- __ARCHIVE_DEMO_MOCK__ 演示站专用：页面内 Mock 拦截层（不发真实请求） -->
+  <script>
+  (function () {
+    /* 1) 同步加载 sw.js（阻塞执行，保证 Vue 启动前装配完成） */
+    function loadCode() {
+      var cands = ['./sw.js', '/sw.js'];
+      for (var i = 0; i < cands.length; i++) {
+        try {
+          var x = new XMLHttpRequest();
+          x.open('GET', cands[i], false);
+          x.send();
+          if (x.status === 200 && x.responseText && x.responseText.length > 1000) {
+            return x.responseText;
+          }
+        } catch (e) { /* 换下一个候选 */ }
+      }
+      return null;
+    }
+
+    var code = loadCode();
+    if (!code) {
+      console.warn('[demo] 未加载 sw.js，Mock 未启用');
+      return;
+    }
+
+    /* 2) 用桩 self 在页面内运行 sw.js，取出其 route 处理器 */
+    var stub = {
+      addEventListener: function () {},
+      skipWaiting: function () {},
+      clients: { claim: function () {}, matchAll: function () { return Promise.resolve([]); } },
+      registration: { unregister: function () { return Promise.resolve(); } },
+      location: { href: location.href, origin: location.origin },
+      caches: {
+        open: function () {
+          return Promise.resolve({
+            put: function () { return Promise.resolve(); },
+            match: function () { return Promise.resolve(null); },
+            addAll: function () { return Promise.resolve(); }
+          });
+        },
+        keys: function () { return Promise.resolve([]); },
+        delete: function () { return Promise.resolve(true); }
+      },
+      console: console
+    };
+    var mock = null;
+    try {
+      new Function('self', code)(stub);
+      mock = stub.__archiveMock || null;
+    } catch (e) {
+      console.error('[demo] sw.js 执行失败', e);
+      return;
+    }
+    if (!mock) {
+      console.warn('[demo] sw.js 未导出 mock');
+      return;
+    }
+    console.info('[demo] Mock 已启用 · ' + mock.version);
+
+    /* 3) 请求判定：只拦截 /api/，其余走真实网络（静态资源） */
+    function isApi(u) {
+      var s = String(u || '');
+      if (/^https?:\/\//i.test(s)) {
+        try { s = new URL(s).pathname; } catch (e) { /* ignore */ }
+      }
+      return s.indexOf('/api/') === 0;
+    }
+    function splitUrl(u) {
+      var s = String(u || '');
+      var q = '';
+      var i = s.indexOf('?');
+      if (i >= 0) { q = s.slice(i + 1); s = s.slice(0, i); }
+      if (/^https?:\/\//i.test(s)) {
+        try { s = new URL(s).pathname; } catch (e) { /* ignore */ }
+      }
+      return { path: s, params: new URLSearchParams(q) };
+    }
+    function parseBody(b) {
+      if (!b) return null;
+      if (typeof b === 'string') {
+        try { return JSON.parse(b); } catch (e) { return b; }
+      }
+      return b;
+    }
+
+    /* ---- fetch 拦截 ---- */
+    var realFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      var url = (typeof input === 'string') ? input : (input && input.url);
+      if (!isApi(url)) return realFetch(input, init);
+      var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+      var sp = splitUrl(url);
+      var body = parseBody((init && init.body) || (input && input.body));
+      var data = mock.route(method, sp.path, sp.params, body);
+      var text = JSON.stringify(data);
+      return Promise.resolve(new Response(text, {
+        status: 200,
+        statusText: 'OK',
+        headers: { 'Content-Type': 'application/json;charset=UTF-8' }
+      }));
+    };
+
+    /* ---- XMLHttpRequest 拦截（axios 走这条）---- */
+    var RealXHR = window.XMLHttpRequest;
+
+    function MockXHR() {
+      this.readyState = 0;
+      this.status = 0;
+      this.statusText = '';
+      this.responseText = '';
+      this.response = null;
+      this.responseURL = '';
+      this.responseType = '';
+      this.timeout = 0;
+      this.withCredentials = false;
+      this._listeners = {};
+      this._reqHeaders = {};
+      this._real = null;
+      var self = this;
+      this.upload = {
+        addEventListener: function () {}, removeEventListener: function () {},
+        dispatchEvent: function () { return true; }
+      };
+      this.onreadystatechange = null;
+      this.onload = null;
+      this.onerror = null;
+      this.onloadend = null;
+      this.onprogress = null;
+      this.ontimeout = null;
+      void self;
+    }
+
+    MockXHR.prototype.open = function (method, url, async) {
+      this._method = method;
+      this._url = url;
+      this._async = async !== false;
+      this.readyState = 1;
+    };
+    MockXHR.prototype.setRequestHeader = function (k, v) { this._reqHeaders[k] = v; };
+    MockXHR.prototype.getAllResponseHeaders = function () {
+      return 'content-type: application/json;charset=UTF-8\r\n';
+    };
+    MockXHR.prototype.getResponseHeader = function (k) {
+      return String(k).toLowerCase() === 'content-type'
+        ? 'application/json;charset=UTF-8' : null;
+    };
+    MockXHR.prototype.addEventListener = function (t, fn) {
+      (this._listeners[t] = this._listeners[t] || []).push(fn);
+    };
+    MockXHR.prototype.removeEventListener = function () {};
+    MockXHR.prototype.dispatchEvent = function (ev) {
+      var fns = this._listeners[ev.type] || [];
+      for (var i = 0; i < fns.length; i++) fns[i].call(this, ev);
+      var h = this['on' + ev.type];
+      if (typeof h === 'function') h.call(this, ev);
+      return true;
+    };
+    MockXHR.prototype.abort = function () { if (this._real) this._real.abort(); };
+    MockXHR.prototype.overrideMimeType = function () {};
+
+    function fire(xhr, type) {
+      var ev = { type: type, target: xhr, currentTarget: xhr, lengthComputable: false, loaded: 0, total: 0 };
+      xhr.dispatchEvent(ev);
+    }
+
+    MockXHR.prototype.send = function (body) {
+      var xhr = this;
+
+      /* 非 /api：委托真实 XHR，保证静态资源正常加载 */
+      if (!isApi(this._url)) {
+        var real = new RealXHR();
+        this._real = real;
+        var self2 = this;
+        real.onreadystatechange = function () {
+          self2.readyState = real.readyState;
+          self2.status = real.status;
+          self2.statusText = real.statusText;
+          self2.responseText = real.responseText;
+          self2.response = real.response;
+          self2.responseURL = real.responseURL;
+          fire(self2, 'readystatechange');
+        };
+        real.onload = function () { fire(self2, 'load'); };
+        real.onerror = function () { fire(self2, 'error'); };
+        real.onloadend = function () { fire(self2, 'loadend'); };
+        try {
+          real.open(this._method, this._url, this._async);
+          for (var k in this._reqHeaders) real.setRequestHeader(k, this._reqHeaders[k]);
+          real.send(body);
+        } catch (e) {
+          console.error('[demo] 真实请求失败', e);
+        }
+        return;
+      }
+
+      /* /api：走 mock */
+      var sp = splitUrl(this._url);
+      var method = String(this._method || 'GET').toUpperCase();
+      var data;
+      try {
+        data = mock.route(method, sp.path, sp.params, parseBody(body));
+      } catch (e) {
+        data = { success: false, code: '500', message: String((e && e.message) || e), data: null };
+      }
+      var text = JSON.stringify(data);
+
+      var done = function () {
+        xhr.readyState = 4;
+        xhr.status = 200;
+        xhr.statusText = 'OK';
+        xhr.responseText = text;
+        xhr.response = text;
+        xhr.responseURL = String(xhr._url || '');
+        fire(xhr, 'readystatechange');
+        fire(xhr, 'load');
+        fire(xhr, 'loadend');
+      };
+      if (this._async) setTimeout(done, 0); else done();
+    };
+
+    window.XMLHttpRequest = MockXHR;
+  })();
+  </script>
+
+</body>
+</html>
